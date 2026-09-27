@@ -43,6 +43,25 @@ export default async function UnitPage({ params }: PageProps<"/unit/[unitNo]">) 
     .eq("student_id", profile.id)
     .maybeSingle();
 
+  const { data: membership } = await db
+    .from("group_members")
+    .select("groups!inner(id,name,unit_id,group_members(profiles(full_name,email)))")
+    .eq("student_id", profile.id)
+    .eq("groups.unit_id", unit.id)
+    .maybeSingle();
+
+  const group = membership?.groups as unknown as
+    | { id: string; name: string; group_members: { profiles: { full_name: string | null; email: string } | null }[] }
+    | undefined;
+
+  const { data: activitySub } = group
+    ? await db
+        .from("activity_submissions")
+        .select("status,score,submitted_at")
+        .eq("group_id", group.id)
+        .maybeSingle()
+    : { data: null };
+
   return (
     <>
       <NavHeader name={profile.full_name || profile.email} role={profile.role} />
@@ -115,6 +134,41 @@ export default async function UnitPage({ params }: PageProps<"/unit/[unitNo]">) 
               ช่วงเวลา: {fmt(status.window.opens_at)} – {fmt(status.window.closes_at)}
               {status.window.label ? ` (${status.window.label})` : ""}
             </p>
+          )}
+        </div>
+
+        <div className="bg-white rounded-xl border p-6 space-y-3">
+          <h2 className="font-semibold text-slate-800">ใบกิจกรรม (งานกลุ่ม)</h2>
+          {!group ? (
+            <p className="text-sm text-slate-400">ยังไม่ได้ถูกจัดกลุ่มสำหรับหน่วยนี้ กรุณาติดต่อครู</p>
+          ) : (
+            <>
+              <p className="text-sm text-slate-600">
+                กลุ่ม: {group.name} — สมาชิก:{" "}
+                {group.group_members.map((m) => m.profiles?.full_name || m.profiles?.email).join(", ")}
+              </p>
+              {activitySub ? (
+                <p className="text-sm text-slate-600">
+                  กลุ่มของคุณส่งใบกิจกรรมแล้ว —{" "}
+                  {activitySub.status === "graded"
+                    ? `ตรวจแล้ว ${activitySub.score ?? "-"}/40 คะแนน`
+                    : "รอครูตรวจ"}
+                </p>
+              ) : status.status === "open" ? (
+                <a
+                  href={`/unit/${unit.unit_no}/activity`}
+                  className="inline-block bg-purple-600 text-white rounded-lg px-4 py-2 text-sm font-medium"
+                >
+                  ส่งใบกิจกรรม (ตัวแทนกลุ่ม)
+                </a>
+              ) : (
+                <p className="text-sm text-slate-400">
+                  {status.status === "upcoming"
+                    ? `จะเปิดให้ส่งในวันที่ ${fmt(status.window!.opens_at)}`
+                    : "ยังไม่เปิดหรือปิดรับแล้ว"}
+                </p>
+              )}
+            </>
           )}
         </div>
       </main>

@@ -3,6 +3,8 @@ import { requireTeacher } from "@/lib/auth";
 import { serviceClient } from "@/lib/supabase/server";
 import NavHeader from "@/components/NavHeader";
 import GradeRow from "./GradeRow";
+import GroupManager from "./GroupManager";
+import ActivityGradeRow from "./ActivityGradeRow";
 
 export default async function AdminUnitPage({ params }: PageProps<"/admin/unit/[unitNo]">) {
   const { unitNo } = await params;
@@ -22,6 +24,47 @@ export default async function AdminUnitPage({ params }: PageProps<"/admin/unit/[
   const { data: attempts } = await db
     .from("quiz_attempts")
     .select("student_id,score,total,profiles!quiz_attempts_student_id_fkey(full_name,email,student_code)")
+    .eq("unit_id", unit.id)
+    .order("submitted_at", { ascending: false });
+
+  const { data: allStudents } = await db
+    .from("profiles")
+    .select("id,full_name,email,student_code,class_group")
+    .eq("role", "student")
+    .order("class_group", { ascending: true })
+    .order("student_code", { ascending: true });
+
+  const { data: groupsRaw } = await db
+    .from("groups")
+    .select("id,name,class_group,group_members(student_id,profiles(id,full_name,email,student_code,class_group))")
+    .eq("unit_id", unit.id)
+    .order("created_at", { ascending: true });
+
+  type RawGroup = {
+    id: string;
+    name: string;
+    class_group: string | null;
+    group_members: { profiles: unknown }[] | null;
+  };
+  const groups = ((groupsRaw ?? []) as unknown as RawGroup[]).map((g) => ({
+    id: g.id,
+    name: g.name,
+    class_group: g.class_group,
+    members: (g.group_members ?? [])
+      .map((m) => m.profiles)
+      .flat()
+      .filter(Boolean) as {
+      id: string;
+      full_name: string | null;
+      email: string;
+      student_code: string | null;
+      class_group: string | null;
+    }[],
+  }));
+
+  const { data: activitySubs } = await db
+    .from("activity_submissions")
+    .select("*, groups(name,class_group,group_members(profiles(full_name,email)))")
     .eq("unit_id", unit.id)
     .order("submitted_at", { ascending: false });
 
@@ -79,6 +122,28 @@ export default async function AdminUnitPage({ params }: PageProps<"/admin/unit/[
             ))}
             {(submissions ?? []).length === 0 && (
               <p className="text-slate-400 text-sm">ยังไม่มีนักศึกษาส่งใบงาน</p>
+            )}
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="font-semibold">จัดกลุ่มนักศึกษา (สำหรับใบกิจกรรม)</h2>
+          <div className="bg-white border rounded-xl p-4">
+            <GroupManager unitId={unit.id} allStudents={allStudents ?? []} initialGroups={groups} />
+          </div>
+        </section>
+
+        <section className="space-y-3">
+          <h2 className="font-semibold">ใบกิจกรรมที่ส่งมา ({activitySubs?.length ?? 0} กลุ่ม)</h2>
+          <div className="space-y-3">
+            {(activitySubs ?? []).map((s) => (
+              <ActivityGradeRow
+                key={s.id}
+                submission={s as unknown as React.ComponentProps<typeof ActivityGradeRow>["submission"]}
+              />
+            ))}
+            {(activitySubs ?? []).length === 0 && (
+              <p className="text-slate-400 text-sm">ยังไม่มีกลุ่มส่งใบกิจกรรม</p>
             )}
           </div>
         </section>
